@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-arabic: "IBM Plex Sans Arabic", ui-sans-serif, system-ui, sans-serif;
+
+  --color-swiss-black: #111111;
+  --color-swiss-blue: #0033a0;
+  --color-swiss-gray: #e5e5e5;
+}
+
+@layer base {
+  body {
+    @apply text-swiss-black bg-white antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-bold tracking-tight;
+  }
+}
+
+/* Swiss Style Utilities */
+@layer utilities {
+  .swiss-grid {
+    @apply grid grid-cols-4 md:grid-cols-12 gap-4 md:gap-6 w-full max-w-7xl mx-auto px-4 md:px-8;
+  }
+
+  .swiss-divider {
+    @apply border-t border-swiss-black/10 w-full;
+  }
+
+  .swiss-divider-blue {
+    @apply border-t border-swiss-blue w-full;
+  }
+}
+
+/* RTL Support */
+[dir="rtl"] {
+  font-family: var(--font-arabic);
+}
+
+[dir="ltr"] {
+  font-family: var(--font-sans);
+}
