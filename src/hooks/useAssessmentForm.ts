@@ -3,9 +3,8 @@ import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { respondentSchema, RespondentFormData } from "../lib/assessmentValidation";
 import { SURVEY_CONFIG } from "../types/surveyDefinitions";
-import { db } from "../lib/firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { AssessmentSubmission } from "../types/assessment";
+import { functions } from "../lib/firebase";
+import { httpsCallable } from "firebase/functions";
 
 const STORAGE_KEY = "btransform_assessment_draft_v2";
 const ENTERPRISE_BANDS = new Set(["501–2000", "2001+"]);
@@ -125,11 +124,10 @@ export function useAssessmentForm() {
     setError(null);
 
     try {
-      const submission: AssessmentSubmission = {
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+      const submitAssessmentFunction = httpsCallable(functions, "submitAssessment");
+
+      await submitAssessmentFunction({
         surveyVersion: version,
-        companySizeBand: data.employeeCountBand,
         respondent: {
           firstName: data.firstName,
           lastName: data.lastName,
@@ -146,18 +144,13 @@ export function useAssessmentForm() {
         utmParams: getUtmParams(),
         referrer: document.referrer,
         userAgent: navigator.userAgent,
-        emailStatus: "pending",
-        scoreSummary: null,
-        aiReport: null,
-      };
-
-      await addDoc(collection(db, "assessmentSubmissions"), submission);
+      });
       
       window.localStorage.removeItem(STORAGE_KEY);
       setStep(successStep);
     } catch (err) {
       console.error("Submission error", err);
-      setError("Failed to submit assessment. Please try again.");
+      setError("Failed to submit assessment or send the report. Please try again.");
     } finally {
       setIsSubmitting(false);
     }

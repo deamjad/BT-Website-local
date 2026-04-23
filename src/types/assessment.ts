@@ -39,6 +39,7 @@ export interface RespondentInfo {
 export interface AssessmentScoreSummary {
   overallScore: number;
   dimensionScores: Record<Dimension, number>;
+  bottlenecks: Dimension[];
 }
 
 export interface AssessmentReport {
@@ -60,6 +61,10 @@ export interface AssessmentSubmission {
   referrer: string;
   userAgent: string;
   emailStatus: "pending" | "sent" | "failed";
+  emailProviderMessageId?: string | null;
+  emailError?: string;
+  sentAt?: FirestoreDateValue;
   scoreSummary: AssessmentScoreSummary | null;
-  aiReport: AssessmentReport | null;
+  reportSummary?: AssessmentReport | null;
+  aiReport?: AssessmentReport | null;
 }
