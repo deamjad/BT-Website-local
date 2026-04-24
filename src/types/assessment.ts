@@ -48,6 +48,30 @@ export interface AssessmentReport {
   recommendations: string[];
 }
 
+export interface AiDimensionAnalysis {
+  dimension: Dimension;
+  score: number;
+  insight: string;
+  implication: string;
+}
+
+export interface AiRoadmapItem {
+  phase: "30 days" | "60 days" | "90 days";
+  focus: string;
+  actions: string[];
+}
+
+export interface AiAssessmentReport {
+  executiveSummary: string;
+  businessDiagnosis: string;
+  dimensionAnalysis: AiDimensionAnalysis[];
+  keyRisks: string[];
+  opportunities: string[];
+  topPriorities: string[];
+  roadmap: AiRoadmapItem[];
+  closingInsight: string;
+}
+
 export type FirestoreDateValue = Date | Timestamp | FieldValue;
 
 export interface AssessmentSubmission {
@@ -67,5 +91,10 @@ export interface AssessmentSubmission {
   sentAt?: FirestoreDateValue;
   scoreSummary: AssessmentScoreSummary | null;
   reportSummary?: AssessmentReport | null;
-  aiReport?: AssessmentReport | null;
+  aiStatus?: "generated" | "fallback" | "failed";
+  aiModel?: string;
+  aiGeneratedAt?: FirestoreDateValue;
+  aiError?: string;
+  aiReport?: AiAssessmentReport | null;
+  reportVersion?: string;
 }

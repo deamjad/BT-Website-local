@@ -1,3 +1,4 @@
+import { GoogleGenAI } from "@google/genai";
 import { initializeApp } from "firebase-admin/app";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/https";
@@ -8,12 +9,29 @@ import { z } from "zod";
 initializeApp();
 
 const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
+const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const FIRESTORE_DATABASE_ID =
   process.env.FIRESTORE_DATABASE_ID ?? "ai-studio-670aaabe-4bc0-4524-9b39-588e755821ca";
 const REPORT_FROM_EMAIL =
   process.env.REPORT_FROM_EMAIL ?? "Business Transformation <onboarding@resend.dev>";
 const REPORT_BCC_EMAIL = process.env.REPORT_BCC_EMAIL ?? "deamjad@gmail.com";
 const REPORT_SUBJECT = "Personalized Assessment Report from Business Transformation Limited";
+const REPORT_VERSION = "visual-ai-v1";
+const DEFAULT_AI_MODEL = process.env.AI_MODEL ?? "gemini-2.5-flash";
+
+const COLORS = {
+  navy: "#0B2E5E",
+  blue: "#0F3EA8",
+  sky: "#DCEAFE",
+  ink: "#111827",
+  muted: "#64748B",
+  line: "#D8DEE9",
+  soft: "#F4F7FB",
+  green: "#15803D",
+  amber: "#B45309",
+  red: "#B91C1C",
+  white: "#FFFFFF",
+};
 
 const DIMENSIONS = [
   "strategyLeadership",
@@ -26,6 +44,7 @@ const DIMENSIONS = [
 
 type Dimension = (typeof DIMENSIONS)[number];
 type SurveyVersion = "smb" | "enterprise";
+type AiStatus = "generated" | "fallback" | "failed";
 
 const dimensionLabels: Record<Dimension, string> = {
   strategyLeadership: "Strategy & Leadership",
@@ -115,7 +134,86 @@ const submissionSchema = z.object({
   userAgent: z.string().default(""),
 });
 
+const aiDimensionAnalysisSchema = z.object({
+  dimension: z.enum(DIMENSIONS),
+  score: z.number().min(1).max(5),
+  insight: z.string().trim().min(20),
+  implication: z.string().trim().min(20),
+});
+
+const aiRoadmapItemSchema = z.object({
+  phase: z.enum(["30 days", "60 days", "90 days"]),
+  focus: z.string().trim().min(10),
+  actions: z.array(z.string().trim().min(8)).min(2).max(4),
+});
+
+const aiAssessmentReportSchema = z.object({
+  executiveSummary: z.string().trim().min(60),
+  businessDiagnosis: z.string().trim().min(60),
+  dimensionAnalysis: z.array(aiDimensionAnalysisSchema).length(DIMENSIONS.length),
+  keyRisks: z.array(z.string().trim().min(10)).min(3).max(5),
+  opportunities: z.array(z.string().trim().min(10)).min(3).max(5),
+  topPriorities: z.array(z.string().trim().min(10)).min(3).max(5),
+  roadmap: z.array(aiRoadmapItemSchema).length(3),
+  closingInsight: z.string().trim().min(30),
+});
+
+const aiResponseJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "executiveSummary",
+    "businessDiagnosis",
+    "dimensionAnalysis",
+    "keyRisks",
+    "opportunities",
+    "topPriorities",
+    "roadmap",
+    "closingInsight",
+  ],
+  properties: {
+    executiveSummary: { type: "string" },
+    businessDiagnosis: { type: "string" },
+    dimensionAnalysis: {
+      type: "array",
+      minItems: 6,
+      maxItems: 6,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["dimension", "score", "insight", "implication"],
+        properties: {
+          dimension: { type: "string", enum: DIMENSIONS },
+          score: { type: "number" },
+          insight: { type: "string" },
+          implication: { type: "string" },
+        },
+      },
+    },
+    keyRisks: { type: "array", minItems: 3, maxItems: 5, items: { type: "string" } },
+    opportunities: { type: "array", minItems: 3, maxItems: 5, items: { type: "string" } },
+    topPriorities: { type: "array", minItems: 3, maxItems: 5, items: { type: "string" } },
+    roadmap: {
+      type: "array",
+      minItems: 3,
+      maxItems: 3,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["phase", "focus", "actions"],
+        properties: {
+          phase: { type: "string", enum: ["30 days", "60 days", "90 days"] },
+          focus: { type: "string" },
+          actions: { type: "array", minItems: 2, maxItems: 4, items: { type: "string" } },
+        },
+      },
+    },
+    closingInsight: { type: "string" },
+  },
+};
+
 type SubmissionPayload = z.infer<typeof submissionSchema>;
+type AiAssessmentReport = z.infer<typeof aiAssessmentReportSchema>;
 
 interface ScoreSummary {
   overallScore: number;
@@ -126,6 +224,13 @@ interface ScoreSummary {
 interface ReportSummary {
   summary: string;
   recommendations: string[];
+}
+
+interface AiReportResult {
+  status: AiStatus;
+  report: AiAssessmentReport;
+  model: string;
+  error?: string;
 }
 
 function roundScore(value: number) {
@@ -174,6 +279,20 @@ function maturityBand(score: number) {
   return "foundational";
 }
 
+function maturityBandLabel(score: number) {
+  const band = maturityBand(score);
+  if (band === "advanced") return "Advanced maturity";
+  if (band === "developing") return "Developing maturity";
+  return "Foundational maturity";
+}
+
+function scoreColor(score: number) {
+  if (score >= 4.2) return COLORS.green;
+  if (score >= 3.2) return COLORS.blue;
+  if (score >= 2.3) return COLORS.amber;
+  return COLORS.red;
+}
+
 function buildReportSummary(payload: SubmissionPayload, scoreSummary: ScoreSummary): ReportSummary {
   const band = maturityBand(scoreSummary.overallScore);
   const companyName = payload.respondent.companyName;
@@ -208,74 +327,602 @@ function buildReportSummary(payload: SubmissionPayload, scoreSummary: ScoreSumma
   };
 }
 
-function generatePdf(
+function getAnswerPatterns(payload: SubmissionPayload) {
+  const questions = surveyQuestions[payload.surveyVersion];
+  return Object.fromEntries(
+    DIMENSIONS.map((dimension) => {
+      const values = questions
+        .filter((question) => question.dimension === dimension)
+        .map((question) => payload.answers[question.id])
+        .filter((value): value is number => typeof value === "number");
+
+      return [
+        dimension,
+        {
+          min: Math.min(...values),
+          max: Math.max(...values),
+          lowResponses: values.filter((value) => value <= 2).length,
+          neutralResponses: values.filter((value) => value === 3).length,
+          strongResponses: values.filter((value) => value >= 4).length,
+        },
+      ];
+    }),
+  );
+}
+
+function buildSanitizedAssessmentContext(
+  payload: SubmissionPayload,
+  scoreSummary: ScoreSummary,
+) {
+  return {
+    companyName: payload.respondent.companyName,
+    industry: payload.respondent.industry,
+    companySizeBand: payload.respondent.employeeCountBand,
+    jobTitle: payload.respondent.jobTitle,
+    surveyVersion: payload.surveyVersion,
+    statedMainChallenge: payload.respondent.mainChallenge ?? "",
+    maturityBand: maturityBand(scoreSummary.overallScore),
+    overallScore: scoreSummary.overallScore,
+    dimensionScores: scoreSummary.dimensionScores,
+    bottlenecks: scoreSummary.bottlenecks,
+    dimensionLabels,
+    answerPatterns: getAnswerPatterns(payload),
+  };
+}
+
+function buildFallbackAiReport(
   payload: SubmissionPayload,
   scoreSummary: ScoreSummary,
   reportSummary: ReportSummary,
+): AiAssessmentReport {
+  const companyName = payload.respondent.companyName;
+  const bottleneckLabels = scoreSummary.bottlenecks.map((dimension) => dimensionLabels[dimension]);
+  const bandLabel = maturityBandLabel(scoreSummary.overallScore).toLowerCase();
+
+  return {
+    executiveSummary: `${companyName} completed the Organizational Maturity Assessment and achieved an overall score of ${scoreSummary.overallScore} out of 5, placing the organization in the ${bandLabel} range. ${reportSummary.summary}`,
+    businessDiagnosis: `The results suggest that the business has a practical opportunity to improve execution consistency by focusing on the lowest-scoring capabilities first. The primary bottleneck area is ${bottleneckLabels.join(", ")}, which may be limiting pace, accountability, or the ability to scale improvement across the organization.`,
+    dimensionAnalysis: DIMENSIONS.map((dimension) => ({
+      dimension,
+      score: scoreSummary.dimensionScores[dimension],
+      insight: `${dimensionLabels[dimension]} scored ${scoreSummary.dimensionScores[dimension]} out of 5, indicating ${
+        scoreSummary.bottlenecks.includes(dimension)
+          ? "a priority area for near-term management attention."
+          : "a capability area that should be maintained while the weakest areas are strengthened."
+      }`,
+      implication: scoreSummary.bottlenecks.includes(dimension)
+        ? "If this area is not addressed, improvement initiatives may continue to face recurring friction, unclear ownership, or inconsistent follow-through."
+        : "This area can support the improvement roadmap by providing stability while leadership focuses on the most constrained dimensions.",
+    })),
+    keyRisks: [
+      "Improvement efforts may become fragmented if ownership and decision rights are not clarified.",
+      "The lowest-scoring dimensions may continue to slow execution if they are treated as symptoms rather than operating constraints.",
+      "Progress may be difficult to sustain without a simple review cadence and measurable 90-day priorities.",
+    ],
+    opportunities: [
+      `Use ${bottleneckLabels[0]} as the first focused improvement sprint.`,
+      "Turn the assessment results into a short leadership conversation about priorities, accountability, and cadence.",
+      "Create a practical roadmap that links operating improvements to measurable business outcomes.",
+    ],
+    topPriorities: reportSummary.recommendations.slice(0, 4),
+    roadmap: [
+      {
+        phase: "30 days",
+        focus: "Align leadership on the highest-impact constraint.",
+        actions: [
+          "Review assessment results with the leadership team.",
+          "Select one bottleneck dimension as the first improvement sprint.",
+          "Define owners, success measures, and immediate blockers.",
+        ],
+      },
+      {
+        phase: "60 days",
+        focus: "Create repeatable operating rhythm.",
+        actions: [
+          "Introduce a simple weekly or biweekly progress cadence.",
+          "Track actions, decisions, blockers, and measurable outcomes.",
+          "Adjust priorities based on evidence from the first sprint.",
+        ],
+      },
+      {
+        phase: "90 days",
+        focus: "Scale what works and prepare the next improvement wave.",
+        actions: [
+          "Document lessons learned and repeatable practices.",
+          "Extend the approach to the next bottleneck dimension.",
+          "Agree the next 90-day transformation priorities.",
+        ],
+      },
+    ],
+    closingInsight:
+      "The assessment is a starting point for focused action. The strongest next step is to convert the findings into a practical, time-bound improvement agenda.",
+  };
+}
+
+function extractJsonObject(text: string) {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;
+
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("Gemini did not return a JSON object.");
+  }
+
+  return trimmed.slice(start, end + 1);
+}
+
+async function generateAiInsight(params: {
+  apiKey: string;
+  payload: SubmissionPayload;
+  scoreSummary: ScoreSummary;
+  reportSummary: ReportSummary;
+}): Promise<AiReportResult> {
+  const model = DEFAULT_AI_MODEL;
+
+  try {
+    if (!params.apiKey) {
+      throw new Error("GEMINI_API_KEY is not configured.");
+    }
+
+    const ai = new GoogleGenAI({ apiKey: params.apiKey });
+    const sanitizedContext = buildSanitizedAssessmentContext(params.payload, params.scoreSummary);
+    const prompt = [
+      "You are a senior business transformation consultant.",
+      "Create a concise, executive-ready assessment report from the structured data below.",
+      "Do not invent facts, financial data, headcount details, market claims, or scores.",
+      "Scores are deterministic and must be repeated exactly as provided.",
+      "Use practical business language for a prospective client. Avoid academic jargon.",
+      "Focus on what is likely happening operationally, why it matters, and what to do next.",
+      "Return only valid JSON that matches the provided schema.",
+      "",
+      JSON.stringify(sanitizedContext, null, 2),
+    ].join("\n");
+
+    const response = await ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: {
+        temperature: 0.4,
+        maxOutputTokens: 3500,
+        responseMimeType: "application/json",
+        responseJsonSchema: aiResponseJsonSchema,
+      },
+    });
+
+    const parsedJson = JSON.parse(extractJsonObject(response.text ?? ""));
+    const parsedReport = aiAssessmentReportSchema.parse(parsedJson);
+
+    return {
+      status: "generated",
+      model,
+      report: parsedReport,
+    };
+  } catch (error) {
+    return {
+      status: "fallback",
+      model,
+      error: getSafeErrorMessage(error),
+      report: buildFallbackAiReport(params.payload, params.scoreSummary, params.reportSummary),
+    };
+  }
+}
+
+function generatePdf(
+  payload: SubmissionPayload,
+  scoreSummary: ScoreSummary,
+  aiReport: AiAssessmentReport,
+  aiStatus: AiStatus,
 ) {
   return new Promise<Buffer>((resolve, reject) => {
-    const doc = new PDFDocument({ size: "A4", margin: 50 });
+    const doc = new PDFDocument({ size: "A4", margin: 42 });
     const chunks: Buffer[] = [];
 
     doc.on("data", (chunk: Buffer) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    doc.font("Helvetica-Bold").fontSize(22).text("Business Transformation Limited");
-    doc.moveDown(0.4);
-    doc.fontSize(18).text("Personalized Organizational Maturity Report");
-    doc.moveDown();
-
-    doc.font("Helvetica").fontSize(11);
-    doc.text(`Prepared for: ${payload.respondent.firstName} ${payload.respondent.lastName}`);
-    doc.text(`Company: ${payload.respondent.companyName}`);
-    doc.text(`Assessment version: ${payload.surveyVersion.toUpperCase()}`);
-    doc.text(`Overall maturity score: ${scoreSummary.overallScore} / 5`);
-    doc.moveDown();
-
-    doc.font("Helvetica-Bold").fontSize(14).text("Executive Summary");
-    doc.moveDown(0.4);
-    doc.font("Helvetica").fontSize(11).text(reportSummary.summary, { lineGap: 4 });
-    doc.moveDown();
-
-    doc.font("Helvetica-Bold").fontSize(14).text("Dimension Scores");
-    doc.moveDown(0.4);
-    DIMENSIONS.forEach((dimension) => {
-      doc
-        .font("Helvetica")
-        .fontSize(11)
-        .text(`${dimensionLabels[dimension]}: ${scoreSummary.dimensionScores[dimension]} / 5`);
-    });
-    doc.moveDown();
-
-    doc.font("Helvetica-Bold").fontSize(14).text("Primary Bottlenecks");
-    doc.moveDown(0.4);
-    scoreSummary.bottlenecks.forEach((dimension) => {
-      doc.font("Helvetica").fontSize(11).text(`- ${dimensionLabels[dimension]}`);
-    });
-    doc.moveDown();
-
-    doc.font("Helvetica-Bold").fontSize(14).text("Recommended Next Steps");
-    doc.moveDown(0.4);
-    reportSummary.recommendations.forEach((recommendation) => {
-      doc.font("Helvetica").fontSize(11).text(`- ${recommendation}`, { lineGap: 4 });
-    });
-
-    doc.moveDown();
-    doc
-      .fontSize(9)
-      .fillColor("#555555")
-      .text("This report is based on the assessment responses submitted online.", {
-        align: "left",
-      });
+    drawCoverPage(doc, payload, scoreSummary, aiStatus);
+    doc.addPage();
+    drawScoreSnapshot(doc, scoreSummary, aiReport);
+    doc.addPage();
+    drawInsightPages(doc, scoreSummary, aiReport);
+    doc.addPage();
+    drawRoadmapAndClose(doc, aiReport);
 
     doc.end();
   });
 }
 
+function pageBounds(doc: PDFKit.PDFDocument) {
+  const left = doc.page.margins.left;
+  const right = doc.page.width - doc.page.margins.right;
+  const top = doc.page.margins.top;
+  const bottom = doc.page.height - doc.page.margins.bottom;
+  return { left, right, top, bottom, width: right - left };
+}
+
+function addFooter(doc: PDFKit.PDFDocument) {
+  const { left, right, bottom } = pageBounds(doc);
+  doc
+    .font("Helvetica")
+    .fontSize(8)
+    .fillColor(COLORS.muted)
+    .text("Business Transformation Limited", left, bottom + 10)
+    .text("Personalized Organizational Maturity Report", left, bottom + 10, {
+      align: "right",
+      width: right - left,
+    });
+}
+
+function ensureSpace(doc: PDFKit.PDFDocument, neededHeight: number) {
+  const { bottom } = pageBounds(doc);
+  if (doc.y + neededHeight > bottom) {
+    addFooter(doc);
+    doc.addPage();
+  }
+}
+
+function sectionTitle(doc: PDFKit.PDFDocument, title: string) {
+  ensureSpace(doc, 46);
+  const { left } = pageBounds(doc);
+  doc.moveDown(0.4);
+  doc
+    .rect(left, doc.y + 6, 26, 3)
+    .fill(COLORS.blue)
+    .fillColor(COLORS.ink)
+    .font("Helvetica-Bold")
+    .fontSize(15)
+    .text(title, left + 34, doc.y, { lineGap: 2 });
+  doc.moveDown(0.7);
+}
+
+function paragraph(doc: PDFKit.PDFDocument, text: string, options: { fontSize?: number } = {}) {
+  ensureSpace(doc, 76);
+  const { left, width } = pageBounds(doc);
+  doc
+    .font("Helvetica")
+    .fontSize(options.fontSize ?? 10)
+    .fillColor(COLORS.ink)
+    .text(text, left, doc.y, {
+      width,
+      lineGap: 4,
+    });
+  doc.moveDown(0.6);
+}
+
+function bulletList(doc: PDFKit.PDFDocument, items: string[], color = COLORS.blue) {
+  const { left, width } = pageBounds(doc);
+  items.forEach((item) => {
+    ensureSpace(doc, 34);
+    const y = doc.y + 4;
+    doc.circle(left + 4, y + 3, 3).fill(color);
+    doc
+      .font("Helvetica")
+      .fontSize(9.5)
+      .fillColor(COLORS.ink)
+      .text(item, left + 16, doc.y, { width: width - 16, lineGap: 3 });
+    doc.moveDown(0.45);
+  });
+}
+
+function drawScoreCard(
+  doc: PDFKit.PDFDocument,
+  x: number,
+  y: number,
+  width: number,
+  label: string,
+  value: string,
+  accent: string,
+) {
+  doc.rect(x, y, width, 78).fill(COLORS.soft);
+  doc.rect(x, y, 5, 78).fill(accent);
+  doc
+    .font("Helvetica")
+    .fontSize(8)
+    .fillColor(COLORS.muted)
+    .text(label.toUpperCase(), x + 16, y + 16, { width: width - 28 });
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(18)
+    .fillColor(COLORS.ink)
+    .text(value, x + 16, y + 34, { width: width - 28 });
+}
+
+function drawScoreBar(
+  doc: PDFKit.PDFDocument,
+  label: string,
+  score: number,
+  x: number,
+  y: number,
+  width: number,
+) {
+  const barWidth = width - 118;
+  const fillWidth = Math.max(8, (score / 5) * barWidth);
+  doc
+    .font("Helvetica")
+    .fontSize(9)
+    .fillColor(COLORS.ink)
+    .text(label, x, y, { width: 108 });
+  doc.rect(x + 114, y + 3, barWidth, 9).fill("#E6ECF5");
+  doc.rect(x + 114, y + 3, fillWidth, 9).fill(scoreColor(score));
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(9)
+    .fillColor(COLORS.ink)
+    .text(`${score.toFixed(1)}/5`, x + 114 + barWidth + 8, y - 1, { width: 48 });
+}
+
+function drawCoverPage(
+  doc: PDFKit.PDFDocument,
+  payload: SubmissionPayload,
+  scoreSummary: ScoreSummary,
+  aiStatus: AiStatus,
+) {
+  const { left, top, width } = pageBounds(doc);
+  const bandLabel = maturityBandLabel(scoreSummary.overallScore);
+  const date = new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).format(new Date());
+
+  doc.rect(0, 0, doc.page.width, 255).fill(COLORS.navy);
+  doc.rect(left, top + 16, 92, 5).fill(COLORS.sky);
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(13)
+    .fillColor(COLORS.white)
+    .text("BUSINESS TRANSFORMATION LIMITED", left, top + 34, { characterSpacing: 1.5 });
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(30)
+    .fillColor(COLORS.white)
+    .text("Personalized Organizational Maturity Report", left, top + 88, {
+      width: width - 90,
+      lineGap: 6,
+    });
+  doc
+    .font("Helvetica")
+    .fontSize(11)
+    .fillColor("#D8E6FF")
+    .text("Executive insight generated from your assessment results", left, top + 184, {
+      width: width - 90,
+    });
+
+  doc.circle(left + 410, top + 104, 58).fill(COLORS.white);
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(30)
+    .fillColor(scoreColor(scoreSummary.overallScore))
+    .text(scoreSummary.overallScore.toFixed(1), left + 370, top + 84, {
+      width: 80,
+      align: "center",
+    });
+  doc
+    .font("Helvetica")
+    .fontSize(9)
+    .fillColor(COLORS.muted)
+    .text("out of 5", left + 370, top + 122, { width: 80, align: "center" });
+
+  doc.y = 315;
+  drawScoreCard(doc, left, doc.y, 162, "Prepared for", payload.respondent.companyName, COLORS.blue);
+  drawScoreCard(doc, left + 176, doc.y, 162, "Maturity band", bandLabel, scoreColor(scoreSummary.overallScore));
+  drawScoreCard(doc, left + 352, doc.y, 162, "Assessment", payload.surveyVersion.toUpperCase(), COLORS.navy);
+
+  doc.y += 112;
+  sectionTitle(doc, "Report context");
+  paragraph(
+    doc,
+    `Prepared for ${payload.respondent.firstName} ${payload.respondent.lastName}, ${payload.respondent.jobTitle}, on ${date}. Industry: ${payload.respondent.industry}. Employee count band: ${payload.respondent.employeeCountBand}.`,
+  );
+
+  if (payload.respondent.mainChallenge) {
+    sectionTitle(doc, "Stated business challenge");
+    paragraph(doc, payload.respondent.mainChallenge);
+  }
+
+  doc
+    .font("Helvetica")
+    .fontSize(8.5)
+    .fillColor(COLORS.muted)
+    .text(
+      aiStatus === "generated"
+        ? "Insight sections were generated by AI from sanitized assessment data and deterministic scores."
+        : "Insight sections use a deterministic fallback because AI insight generation was unavailable.",
+      left,
+      735,
+      { width },
+    );
+  addFooter(doc);
+}
+
+function drawScoreSnapshot(
+  doc: PDFKit.PDFDocument,
+  scoreSummary: ScoreSummary,
+  aiReport: AiAssessmentReport,
+) {
+  const { left, top, width } = pageBounds(doc);
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(22)
+    .fillColor(COLORS.ink)
+    .text("Score Snapshot", left, top);
+  doc.moveDown(0.8);
+  paragraph(doc, aiReport.executiveSummary, { fontSize: 10.5 });
+
+  const scoreY = doc.y + 8;
+  drawScoreCard(
+    doc,
+    left,
+    scoreY,
+    164,
+    "Overall score",
+    `${scoreSummary.overallScore.toFixed(1)} / 5`,
+    scoreColor(scoreSummary.overallScore),
+  );
+  drawScoreCard(
+    doc,
+    left + 178,
+    scoreY,
+    164,
+    "Maturity range",
+    maturityBandLabel(scoreSummary.overallScore),
+    COLORS.blue,
+  );
+  drawScoreCard(
+    doc,
+    left + 356,
+    scoreY,
+    164,
+    "Primary bottlenecks",
+    `${scoreSummary.bottlenecks.length}`,
+    COLORS.amber,
+  );
+
+  doc.y = scoreY + 108;
+  sectionTitle(doc, "Dimension dashboard");
+  DIMENSIONS.forEach((dimension) => {
+    drawScoreBar(
+      doc,
+      dimensionLabels[dimension],
+      scoreSummary.dimensionScores[dimension],
+      left,
+      doc.y,
+      width - 58,
+    );
+    doc.y += 28;
+  });
+
+  sectionTitle(doc, "Primary bottlenecks");
+  bulletList(
+    doc,
+    scoreSummary.bottlenecks.map(
+      (dimension) =>
+        `${dimensionLabels[dimension]} scored ${scoreSummary.dimensionScores[dimension].toFixed(1)} out of 5 and should be treated as an early improvement focus.`,
+    ),
+    COLORS.amber,
+  );
+  addFooter(doc);
+}
+
+function drawInsightPages(
+  doc: PDFKit.PDFDocument,
+  scoreSummary: ScoreSummary,
+  aiReport: AiAssessmentReport,
+) {
+  const { left, top, width } = pageBounds(doc);
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(22)
+    .fillColor(COLORS.ink)
+    .text("Business Analysis", left, top);
+  doc.moveDown(0.8);
+
+  sectionTitle(doc, "What appears to be happening");
+  paragraph(doc, aiReport.businessDiagnosis, { fontSize: 10.5 });
+
+  sectionTitle(doc, "Dimension-by-dimension insight");
+  aiReport.dimensionAnalysis.forEach((analysis) => {
+    ensureSpace(doc, 70);
+    const y = doc.y;
+    doc.rect(left, y, width, 58).fill(COLORS.soft);
+    doc.rect(left, y, 4, 58).fill(scoreColor(scoreSummary.dimensionScores[analysis.dimension]));
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(10)
+      .fillColor(COLORS.ink)
+      .text(
+        `${dimensionLabels[analysis.dimension]} - ${scoreSummary.dimensionScores[
+          analysis.dimension
+        ].toFixed(1)}/5`,
+        left + 14,
+        y + 10,
+        { width: width - 28 },
+      );
+    doc
+      .font("Helvetica")
+      .fontSize(8.8)
+      .fillColor(COLORS.ink)
+      .text(`${analysis.insight} ${analysis.implication}`, left + 14, y + 27, {
+        width: width - 28,
+        lineGap: 2,
+      });
+    doc.y = y + 70;
+  });
+
+  sectionTitle(doc, "Key risks");
+  bulletList(doc, aiReport.keyRisks, COLORS.red);
+
+  sectionTitle(doc, "Improvement opportunities");
+  bulletList(doc, aiReport.opportunities, COLORS.green);
+  addFooter(doc);
+}
+
+function drawRoadmapAndClose(doc: PDFKit.PDFDocument, aiReport: AiAssessmentReport) {
+  const { left, top, width } = pageBounds(doc);
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(22)
+    .fillColor(COLORS.ink)
+    .text("Recommended Action Plan", left, top);
+  doc.moveDown(0.8);
+
+  sectionTitle(doc, "Top priorities");
+  bulletList(doc, aiReport.topPriorities, COLORS.blue);
+
+  sectionTitle(doc, "30/60/90-day roadmap");
+  aiReport.roadmap.forEach((item) => {
+    ensureSpace(doc, 118);
+    const y = doc.y;
+    doc.rect(left, y, width, 98).fill(COLORS.soft);
+    doc.rect(left, y, 70, 98).fill(COLORS.navy);
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(13)
+      .fillColor(COLORS.white)
+      .text(item.phase, left + 10, y + 38, { width: 50, align: "center" });
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(11)
+      .fillColor(COLORS.ink)
+      .text(item.focus, left + 84, y + 12, { width: width - 100 });
+    doc
+      .font("Helvetica")
+      .fontSize(8.8)
+      .fillColor(COLORS.ink)
+      .text(item.actions.map((action) => `- ${action}`).join("\n"), left + 84, y + 33, {
+        width: width - 100,
+        lineGap: 3,
+      });
+    doc.y = y + 114;
+  });
+
+  sectionTitle(doc, "Closing insight");
+  paragraph(doc, aiReport.closingInsight, { fontSize: 10.5 });
+
+  ensureSpace(doc, 90);
+  doc.rect(left, doc.y + 6, width, 72).fill(COLORS.navy);
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(14)
+    .fillColor(COLORS.white)
+    .text("Ready to turn this assessment into an execution roadmap?", left + 22, doc.y + 24, {
+      width: width - 44,
+    });
+  doc
+    .font("Helvetica")
+    .fontSize(9.5)
+    .fillColor("#D8E6FF")
+    .text("Business Transformation Limited can help prioritize the next sprint and build the operating rhythm to deliver it.", left + 22, doc.y + 45, {
+      width: width - 44,
+    });
+  addFooter(doc);
+}
+
 function getSafeErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
-  return "Unknown email delivery error";
+  return "Unknown delivery error";
 }
 
 async function sendReportEmail(params: {
@@ -295,8 +942,8 @@ async function sendReportEmail(params: {
       to: [params.to],
       bcc: [REPORT_BCC_EMAIL],
       subject: REPORT_SUBJECT,
-      html: `<p>Dear ${params.firstName},</p><p>Thank you for completing the Organizational Maturity Assessment. Your personalized report is attached as a PDF.</p><p>Regards,<br/>Business Transformation Limited</p>`,
-      text: `Dear ${params.firstName},\n\nThank you for completing the Organizational Maturity Assessment. Your personalized report is attached as a PDF.\n\nRegards,\nBusiness Transformation Limited`,
+      html: `<p>Dear ${params.firstName},</p><p>Thank you for completing the Organizational Maturity Assessment. Your personalized visual report is attached as a PDF.</p><p>Regards,<br/>Business Transformation Limited</p>`,
+      text: `Dear ${params.firstName},\n\nThank you for completing the Organizational Maturity Assessment. Your personalized visual report is attached as a PDF.\n\nRegards,\nBusiness Transformation Limited`,
       attachments: [
         {
           filename: "personalized-assessment-report.pdf",
@@ -325,7 +972,7 @@ async function sendReportEmail(params: {
 
 export const submitAssessment = onCall(
   {
-    secrets: [RESEND_API_KEY],
+    secrets: [RESEND_API_KEY, GEMINI_API_KEY],
     region: "us-central1",
   },
   async (request) => {
@@ -370,10 +1017,28 @@ export const submitAssessment = onCall(
       emailStatus: "pending",
       scoreSummary,
       reportSummary,
+      reportVersion: REPORT_VERSION,
     });
 
     try {
-      const pdf = await generatePdf(payload, scoreSummary, reportSummary);
+      const aiResult = await generateAiInsight({
+        apiKey: GEMINI_API_KEY.value(),
+        payload,
+        scoreSummary,
+        reportSummary,
+      });
+
+      await docRef.update({
+        updatedAt: FieldValue.serverTimestamp(),
+        aiStatus: aiResult.status,
+        aiModel: aiResult.model,
+        aiGeneratedAt: FieldValue.serverTimestamp(),
+        aiError: aiResult.error ?? null,
+        aiReport: aiResult.report,
+        reportVersion: REPORT_VERSION,
+      });
+
+      const pdf = await generatePdf(payload, scoreSummary, aiResult.report, aiResult.status);
       const emailMessageId = await sendReportEmail({
         apiKey: RESEND_API_KEY.value(),
         to: payload.respondent.workEmail,
