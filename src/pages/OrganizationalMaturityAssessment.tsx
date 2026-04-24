@@ -6,6 +6,14 @@ import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, ArrowRight, ArrowLeft, Loader2, Info } from "lucide-react";
 
 const EMPLOYEE_BANDS = ["1–50", "51–200", "201–500", "501–2000", "2001+"];
+const PHONE_COUNTRY_CODES = [
+  { value: "+64", label: "NZ +64" },
+  { value: "+61", label: "AU +61" },
+  { value: "+966", label: "SA +966" },
+  { value: "+971", label: "AE +971" },
+  { value: "+44", label: "UK +44" },
+  { value: "+1", label: "US/CA +1" },
+];
 
 export const OrganizationalMaturityAssessment: React.FC = () => {
   const {
@@ -374,12 +382,25 @@ export const OrganizationalMaturityAssessment: React.FC = () => {
                   </div>
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider mb-2">{t("assessment.phoneOptional")}</label>
-                    <input
-                      {...register("phone")}
-                      type="tel"
-                      autoComplete="tel"
-                      className="w-full p-3 border border-swiss-gray rounded focus:border-swiss-blue outline-none transition-colors"
-                    />
+                    <div className="grid grid-cols-[9rem_1fr] gap-3">
+                      <select
+                        {...register("phoneCountryCode")}
+                        aria-label={t("assessment.phoneCountryCode")}
+                        className="w-full p-3 border border-swiss-gray rounded focus:border-swiss-blue outline-none transition-colors bg-white"
+                      >
+                        {PHONE_COUNTRY_CODES.map((code) => (
+                          <option key={code.value} value={code.value}>
+                            {code.label}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        {...register("phone")}
+                        type="tel"
+                        autoComplete="tel"
+                        className="w-full p-3 border border-swiss-gray rounded focus:border-swiss-blue outline-none transition-colors"
+                      />
+                    </div>
                   </div>
                 </div>
 

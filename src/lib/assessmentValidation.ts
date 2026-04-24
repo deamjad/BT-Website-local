@@ -8,6 +8,7 @@ export const respondentSchema = z.object({
   jobTitle: z.string().min(1, "Job title is required"),
   industry: z.string().min(1, "Industry is required"),
   employeeCountBand: z.string().min(1, "Employee count is required"),
+  phoneCountryCode: z.string().optional(),
   phone: z.string().optional(),
   mainChallenge: z.string().optional(),
   consent: z.boolean().refine((value) => value, {

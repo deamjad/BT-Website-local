@@ -48,6 +48,7 @@ export const ar = {
     jobTitle: "المسمى الوظيفي",
     industry: "القطاع",
     employeeCount: "عدد الموظفين",
+    phoneCountryCode: "رمز الدولة",
     phoneOptional: "رقم الهاتف (اختياري)",
     mainChallenge: "التحدي التجاري الرئيسي (اختياري)",
     challengePlaceholder: "ما أكبر عقبة تواجه مؤسستك حاليًا؟",

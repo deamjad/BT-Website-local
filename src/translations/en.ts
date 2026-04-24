@@ -48,6 +48,7 @@ export const en = {
     jobTitle: "Job Title",
     industry: "Industry",
     employeeCount: "Employee Count",
+    phoneCountryCode: "Country Code",
     phoneOptional: "Phone (Optional)",
     mainChallenge: "Main Business Challenge (Optional)",
     challengePlaceholder:

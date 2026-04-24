@@ -29,6 +29,7 @@ export interface RespondentInfo {
   workEmail: string;
   companyName: string;
   jobTitle: string;
+  phoneCountryCode?: string;
   phone?: string;
   industry: string;
   employeeCountBand: string;
