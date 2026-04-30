@@ -350,23 +350,81 @@ function getAnswerPatterns(payload: SubmissionPayload) {
   );
 }
 
+function getRankedDimensions(scoreSummary: ScoreSummary, direction: "strongest" | "weakest") {
+  return [...DIMENSIONS]
+    .sort((left, right) =>
+      direction === "strongest"
+        ? scoreSummary.dimensionScores[right] - scoreSummary.dimensionScores[left]
+        : scoreSummary.dimensionScores[left] - scoreSummary.dimensionScores[right],
+    )
+    .map((dimension) => ({
+      dimension,
+      label: dimensionLabels[dimension],
+      score: scoreSummary.dimensionScores[dimension],
+    }));
+}
+
+function getScoreRange(scoreSummary: ScoreSummary) {
+  const scores = Object.values(scoreSummary.dimensionScores);
+  const highestScore = Math.max(...scores);
+  const lowestScore = Math.min(...scores);
+
+  return {
+    lowestScore,
+    highestScore,
+    spread: roundScore(highestScore - lowestScore),
+  };
+}
+
+function getProfileBalance(scoreSummary: ScoreSummary) {
+  const { spread } = getScoreRange(scoreSummary);
+
+  if (spread >= 1.5) return "uneven";
+  if (spread >= 0.8) return "moderately balanced";
+  return "balanced";
+}
+
+function getQuestionLevelResponses(payload: SubmissionPayload) {
+  return surveyQuestions[payload.surveyVersion].map((question) => ({
+    questionId: question.id,
+    dimension: question.dimension,
+    dimensionLabel: dimensionLabels[question.dimension],
+    response: payload.answers[question.id],
+  }));
+}
+
 function buildSanitizedAssessmentContext(
   payload: SubmissionPayload,
   scoreSummary: ScoreSummary,
 ) {
   return {
-    companyName: payload.respondent.companyName,
-    industry: payload.respondent.industry,
-    companySizeBand: payload.respondent.employeeCountBand,
-    jobTitle: payload.respondent.jobTitle,
+    assessmentVersion: payload.surveyVersion,
     surveyVersion: payload.surveyVersion,
+    respondentRole: payload.respondent.jobTitle,
+    industry: payload.respondent.industry,
+    employeeCountBand: payload.respondent.employeeCountBand,
     statedMainChallenge: payload.respondent.mainChallenge ?? "",
-    maturityBand: maturityBand(scoreSummary.overallScore),
+    maturityLevel: maturityBand(scoreSummary.overallScore),
+    maturityLabel: maturityBandLabel(scoreSummary.overallScore),
+    maturityModelThresholds: {
+      foundational: "overallScore below 3.2",
+      developing: "overallScore from 3.2 to below 4.2",
+      advanced: "overallScore 4.2 and above",
+    },
     overallScore: scoreSummary.overallScore,
     dimensionScores: scoreSummary.dimensionScores,
-    bottlenecks: scoreSummary.bottlenecks,
+    strongestDimensions: getRankedDimensions(scoreSummary, "strongest").slice(0, 3),
+    weakestDimensions: getRankedDimensions(scoreSummary, "weakest").slice(0, 3),
+    bottlenecks: scoreSummary.bottlenecks.map((dimension) => ({
+      dimension,
+      label: dimensionLabels[dimension],
+      score: scoreSummary.dimensionScores[dimension],
+    })),
+    scoreRange: getScoreRange(scoreSummary),
+    profileBalance: getProfileBalance(scoreSummary),
     dimensionLabels,
     answerPatterns: getAnswerPatterns(payload),
+    questionLevelResponses: getQuestionLevelResponses(payload),
   };
 }
 
@@ -468,13 +526,73 @@ async function generateAiInsight(params: {
     const ai = new GoogleGenAI({ apiKey: params.apiKey });
     const sanitizedContext = buildSanitizedAssessmentContext(params.payload, params.scoreSummary);
     const prompt = [
-      "You are a senior business transformation consultant.",
-      "Create a concise, executive-ready assessment report from the structured data below.",
-      "Do not invent facts, financial data, headcount details, market claims, or scores.",
-      "Scores are deterministic and must be repeated exactly as provided.",
-      "Use practical business language for a prospective client. Avoid academic jargon.",
-      "Focus on what is likely happening operationally, why it matters, and what to do next.",
+      "You are a senior business transformation consultant writing for Business Transformation.",
+      "Business Transformation helps organizations improve strategy building, strategy execution, OKRs, operating discipline, agile delivery, operational excellence, data foundations for AI, and AI adoption/change.",
+      "",
+      "Create a concise, executive-ready organizational maturity assessment report from the structured assessment data below.",
+      "",
+      "The report should help a prospective client understand:",
+      "1. their current organizational maturity level,",
+      "2. what their results likely mean operationally,",
+      "3. what strengths they can build on,",
+      "4. what gaps may be limiting execution, growth, or scale,",
+      "5. what practical options they have,",
+      "6. what leadership actions they should consider next.",
+      "",
+      "Audience: a business leader, founder, executive, or senior manager who wants practical clarity, not a generic diagnostic.",
+      "",
+      "Tone: confident, direct, commercially practical, supportive, and executive-friendly.",
+      "Use plain business language. Avoid hype, academic language, and vague transformation buzzwords.",
+      "",
+      "Rules:",
+      "- Do not invent facts, financial data, headcount details, market claims, technologies, competitors, systems, industries, or scores.",
+      "- Scores are deterministic and must be repeated exactly as provided.",
+      "- Do not recalculate scores.",
+      "- Do not claim benchmarks or peer comparisons unless they are explicitly provided.",
+      "- Use the stated main challenge when present, but treat it as the respondent's perspective rather than a verified fact.",
+      "- If the main challenge aligns with weak dimensions, explain the connection.",
+      "- If the main challenge does not align with weak dimensions, mention that the assessment suggests additional areas to explore.",
+      "- Do not overstate certainty. Use language such as 'suggests', 'may indicate', and 'is likely to'.",
+      "",
+      "Interpretation guidance:",
+      "- Do more than summarize scores.",
+      "- Identify the maturity pattern across dimensions.",
+      "- Explain what is probably working well.",
+      "- Explain what is probably creating friction or limiting maturity.",
+      "- Connect weak dimensions to likely operational consequences.",
+      "- Connect strong dimensions to practical advantages.",
+      "- If the profile is uneven, explain why uneven maturity can create execution friction.",
+      "",
+      "Recommendation guidance:",
+      "- Give practical leadership actions, not generic advice.",
+      "- Prioritize the weakest dimensions while considering the full profile.",
+      "- Include realistic options the client could pursue next.",
+      "- Recommended options may include strategy clarification, OKR implementation, governance routines, operating model improvement, process discipline, agile delivery, operational excellence, data readiness, or AI adoption readiness.",
+      "- Make the roadmap realistic for a 30/60/90 day leadership cadence.",
+      "- Actions should be short, specific, and immediately understandable.",
+      "",
+      "Schema mapping:",
+      "- Use executiveSummary for the overall maturity summary.",
+      "- Use businessDiagnosis for the overall interpretation.",
+      "- Use dimensionAnalysis for dimension-level insights and implications.",
+      "- Use opportunities for practical strengths and options the client can build on.",
+      "- Use topPriorities for improvement priorities.",
+      "- Use roadmap for the 30/60/90 day leadership cadence.",
+      "- Use closingInsight for a helpful, non-pushy consultation message.",
+      "- Do not add fields that are not in the schema.",
+      "",
+      "Length control:",
+      "- Executive summary: 3 to 5 sentences.",
+      "- Overall interpretation: 3 to 5 sentences.",
+      "- Dimension insights: 1 to 2 concise sentences each.",
+      "- Strengths: maximum 3 items.",
+      "- Improvement priorities: maximum 3 items.",
+      "- Recommended options: 2 to 4 options.",
+      "- Action items: short imperative statements.",
+      "- Consultation message: 2 to 3 sentences, helpful and non-pushy.",
+      "",
       "Return only valid JSON that matches the provided schema.",
+      "Do not include markdown, commentary, code fences, or text outside the JSON.",
       "",
       JSON.stringify(sanitizedContext, null, 2),
     ].join("\n");
