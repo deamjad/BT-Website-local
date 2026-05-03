@@ -617,6 +617,11 @@ async function generateAiInsight(params: {
       report: parsedReport,
     };
   } catch (error) {
+    console.warn("Gemini assessment report generation failed; using fallback report.", {
+      error: getSafeErrorMessage(error),
+      model,
+    });
+
     return {
       status: "fallback",
       model,
