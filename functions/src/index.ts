@@ -299,6 +299,7 @@ function buildReportSummary(payload: SubmissionPayload, scoreSummary: ScoreSumma
   const bottleneckLabels = scoreSummary.bottlenecks
     .map((dimension) => dimensionLabels[dimension])
     .join(", ");
+  const hasConstraint = hasDistinctBottleneck(scoreSummary);
 
   const summaryByBand: Record<string, string> = {
     advanced: `${companyName} shows strong organizational maturity with clear foundations for sustained execution and scale.`,
@@ -307,7 +308,9 @@ function buildReportSummary(payload: SubmissionPayload, scoreSummary: ScoreSumma
   };
 
   const recommendations = [
-    `Prioritize the lowest-scoring area first: ${bottleneckLabels}.`,
+    hasConstraint
+      ? `Prioritize the lowest-scoring area first: ${bottleneckLabels}.`
+      : "Use the balanced profile to choose one practical improvement theme rather than trying to improve every dimension at once.",
     "Clarify ownership, decision rights, and the next 90-day execution priorities.",
     "Create a simple review cadence that tracks measurable outcomes and blockers.",
     payload.surveyVersion === "enterprise"
@@ -384,6 +387,10 @@ function getProfileBalance(scoreSummary: ScoreSummary) {
   return "balanced";
 }
 
+function hasDistinctBottleneck(scoreSummary: ScoreSummary) {
+  return scoreSummary.bottlenecks.length < DIMENSIONS.length;
+}
+
 function getQuestionLevelResponses(payload: SubmissionPayload) {
   return surveyQuestions[payload.surveyVersion].map((question) => ({
     questionId: question.id,
@@ -415,6 +422,7 @@ function buildSanitizedAssessmentContext(
     dimensionScores: scoreSummary.dimensionScores,
     strongestDimensions: getRankedDimensions(scoreSummary, "strongest").slice(0, 3),
     weakestDimensions: getRankedDimensions(scoreSummary, "weakest").slice(0, 3),
+    hasDistinctBottleneck: hasDistinctBottleneck(scoreSummary),
     bottlenecks: scoreSummary.bottlenecks.map((dimension) => ({
       dimension,
       label: dimensionLabels[dimension],
@@ -436,29 +444,40 @@ function buildFallbackAiReport(
   const companyName = payload.respondent.companyName;
   const bottleneckLabels = scoreSummary.bottlenecks.map((dimension) => dimensionLabels[dimension]);
   const bandLabel = maturityBandLabel(scoreSummary.overallScore).toLowerCase();
+  const hasConstraint = hasDistinctBottleneck(scoreSummary);
 
   return {
     executiveSummary: `${companyName} completed the Organizational Maturity Assessment and achieved an overall score of ${scoreSummary.overallScore} out of 5, placing the organization in the ${bandLabel} range. ${reportSummary.summary}`,
-    businessDiagnosis: `The results suggest that the business has a practical opportunity to improve execution consistency by focusing on the lowest-scoring capabilities first. The primary bottleneck area is ${bottleneckLabels.join(", ")}, which may be limiting pace, accountability, or the ability to scale improvement across the organization.`,
+    businessDiagnosis: hasConstraint
+      ? `The results suggest that the business has a practical opportunity to improve execution consistency by focusing on the lowest-scoring capabilities first. The primary bottleneck area is ${bottleneckLabels.join(", ")}, which may be limiting pace, accountability, or the ability to scale improvement across the organization.`
+      : "The results suggest a balanced maturity profile rather than a single standout constraint. The practical opportunity is to choose one improvement theme, strengthen the operating rhythm around it, and avoid spreading leadership attention across every capability at once.",
     dimensionAnalysis: DIMENSIONS.map((dimension) => ({
       dimension,
       score: scoreSummary.dimensionScores[dimension],
       insight: `${dimensionLabels[dimension]} scored ${scoreSummary.dimensionScores[dimension]} out of 5, indicating ${
-        scoreSummary.bottlenecks.includes(dimension)
+        hasConstraint && scoreSummary.bottlenecks.includes(dimension)
           ? "a priority area for near-term management attention."
-          : "a capability area that should be maintained while the weakest areas are strengthened."
+          : hasConstraint
+            ? "a capability area that should be maintained while the weakest areas are strengthened."
+            : "a capability area that sits at the same maturity level as the wider operating profile."
       }`,
-      implication: scoreSummary.bottlenecks.includes(dimension)
+      implication: hasConstraint && scoreSummary.bottlenecks.includes(dimension)
         ? "If this area is not addressed, improvement initiatives may continue to face recurring friction, unclear ownership, or inconsistent follow-through."
-        : "This area can support the improvement roadmap by providing stability while leadership focuses on the most constrained dimensions.",
+        : hasConstraint
+          ? "This area can support the improvement roadmap by providing stability while leadership focuses on the most constrained dimensions."
+          : "This should be interpreted as part of a system-wide baseline, where progress depends on selecting a focused first theme and building consistent leadership routines around it.",
     })),
     keyRisks: [
       "Improvement efforts may become fragmented if ownership and decision rights are not clarified.",
-      "The lowest-scoring dimensions may continue to slow execution if they are treated as symptoms rather than operating constraints.",
+      hasConstraint
+        ? "The lowest-scoring dimensions may continue to slow execution if they are treated as symptoms rather than operating constraints."
+        : "A balanced profile may create pressure to tackle everything at once instead of selecting one focused improvement sequence.",
       "Progress may be difficult to sustain without a simple review cadence and measurable 90-day priorities.",
     ],
     opportunities: [
-      `Use ${bottleneckLabels[0]} as the first focused improvement sprint.`,
+      hasConstraint
+        ? `Use ${bottleneckLabels[0]} as the first focused improvement sprint.`
+        : "Use the balanced profile to align leaders on one priority improvement theme.",
       "Turn the assessment results into a short leadership conversation about priorities, accountability, and cadence.",
       "Create a practical roadmap that links operating improvements to measurable business outcomes.",
     ],
@@ -562,6 +581,8 @@ async function generateAiInsight(params: {
       "- Connect weak dimensions to likely operational consequences.",
       "- Connect strong dimensions to practical advantages.",
       "- If the profile is uneven, explain why uneven maturity can create execution friction.",
+      "- If all dimensions have the same score, describe this as a balanced maturity profile rather than six separate bottlenecks.",
+      "- Even when scores are equal, differentiate dimension insights by explaining the distinct operating role of each dimension.",
       "",
       "Recommendation guidance:",
       "- Give practical leadership actions, not generic advice.",
@@ -590,6 +611,7 @@ async function generateAiInsight(params: {
       "- Recommended options: 2 to 4 options.",
       "- Action items: short imperative statements.",
       "- Consultation message: 2 to 3 sentences, helpful and non-pushy.",
+      "- Avoid generic phrases such as 'unlock potential' unless they are tied to a specific action, operating routine, or leadership decision.",
       "",
       "Return only valid JSON that matches the provided schema.",
       "Do not include markdown, commentary, code fences, or text outside the JSON.",
@@ -661,21 +683,31 @@ function pageBounds(doc: PDFKit.PDFDocument) {
   const left = doc.page.margins.left;
   const right = doc.page.width - doc.page.margins.right;
   const top = doc.page.margins.top;
-  const bottom = doc.page.height - doc.page.margins.bottom;
+  const bottom = doc.page.height - doc.page.margins.bottom - 36;
   return { left, right, top, bottom, width: right - left };
 }
 
 function addFooter(doc: PDFKit.PDFDocument) {
-  const { left, right, bottom } = pageBounds(doc);
+  const { left, right } = pageBounds(doc);
+  const footerY = doc.page.height - doc.page.margins.bottom - 20;
+  const previousX = doc.x;
+  const previousY = doc.y;
+
   doc
     .font("Helvetica")
     .fontSize(8)
     .fillColor(COLORS.muted)
-    .text("Business Transformation Limited", left, bottom + 10)
-    .text("Personalized Organizational Maturity Report", left, bottom + 10, {
+    .text("Business Transformation Limited", left, footerY, {
+      lineBreak: false,
+    })
+    .text("Personalized Organizational Maturity Report", left, footerY, {
       align: "right",
+      lineBreak: false,
       width: right - left,
     });
+
+  doc.x = previousX;
+  doc.y = previousY;
 }
 
 function ensureSpace(doc: PDFKit.PDFDocument, neededHeight: number) {
@@ -898,8 +930,8 @@ function drawScoreSnapshot(
     left + 356,
     scoreY,
     164,
-    "Primary bottlenecks",
-    `${scoreSummary.bottlenecks.length}`,
+    hasDistinctBottleneck(scoreSummary) ? "Primary bottlenecks" : "Profile shape",
+    hasDistinctBottleneck(scoreSummary) ? `${scoreSummary.bottlenecks.length}` : "Balanced",
     COLORS.amber,
   );
 
@@ -917,15 +949,23 @@ function drawScoreSnapshot(
     doc.y += 28;
   });
 
-  sectionTitle(doc, "Primary bottlenecks");
-  bulletList(
-    doc,
-    scoreSummary.bottlenecks.map(
-      (dimension) =>
-        `${dimensionLabels[dimension]} scored ${scoreSummary.dimensionScores[dimension].toFixed(1)} out of 5 and should be treated as an early improvement focus.`,
-    ),
-    COLORS.amber,
-  );
+  if (hasDistinctBottleneck(scoreSummary)) {
+    sectionTitle(doc, "Primary bottlenecks");
+    bulletList(
+      doc,
+      scoreSummary.bottlenecks.map(
+        (dimension) =>
+          `${dimensionLabels[dimension]} scored ${scoreSummary.dimensionScores[dimension].toFixed(1)} out of 5 and should be treated as an early improvement focus.`,
+      ),
+      COLORS.amber,
+    );
+  } else {
+    sectionTitle(doc, "Balanced maturity profile");
+    paragraph(
+      doc,
+      `All dimensions scored ${scoreSummary.overallScore.toFixed(1)} out of 5, so no single constraint stands out from the assessment. Treat the profile as a system-wide maturity baseline and choose the first improvement focus based on strategic urgency, leadership appetite, and the respondent's stated business challenge.`,
+    );
+  }
   addFooter(doc);
 }
 
