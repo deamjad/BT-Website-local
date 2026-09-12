@@ -1,0 +1,17 @@
+{
+  "name": "Study Companion",
+  "short_name": "Study",
+  "description": "A calm study timer and plan for six NCEA exams.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FDF3F6",
+  "theme_color": "#FDF3F6",
+  "lang": "en-NZ",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
