@@ -5,6 +5,7 @@ import * as timer from './timer.js';
 import * as audio from './audio.js';
 import { go, currentRoute, toast, setMotionSetting, applyMotion, reducedMotion, closeSheet } from './ui.js';
 import { renderToday, renderSetup, renderPlan, renderProgress, renderSettings } from './views.js';
+import { todayKey, esc } from './util.js';
 import { mountSession, renderComplete } from './session-views.js';
 
 const app = document.getElementById('app');
@@ -64,6 +65,7 @@ function render() {
 
   const showNav = NAV_ORDER.includes(path);
   nav.hidden = !showNav;
+  if (showNav) renderNavFoot();
   document.body.classList.toggle('in-session', SESSION_ROUTES.has(path));
   document.body.classList.toggle('no-nav', !showNav);
   nav.querySelectorAll('.nav-item').forEach(a => {
@@ -71,6 +73,18 @@ function render() {
     a.classList.toggle('is-active', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
+}
+
+// Small always-visible context in the sidebar: the nearest exam and the streak.
+function renderNavFoot() {
+  const foot = document.getElementById('nav-foot');
+  if (!foot) return;
+  const today = todayKey();
+  const next = store.upcomingExams(today)[0];
+  const streak = store.streak(today);
+  foot.innerHTML = `
+    ${next ? `<p class="nav-exam"><span class="nav-exam-days">${next.daysLeft}</span> <span>${next.daysLeft === 1 ? 'day' : 'days'} until<br>${esc(next.name)}</span></p>` : '<p class="meta">All exams done.</p>'}
+    ${streak > 1 ? `<p class="nav-streak"><span class="streak-mark" aria-hidden="true"></span>${streak} days in a row</p>` : ''}`;
 }
 
 function boot() {
@@ -84,9 +98,22 @@ function boot() {
 
   store.subscribe(() => {
     if (current && LIVE.has(current.path)) render();
+    else if (current && !nav.hidden) renderNavFoot();
   });
 
   window.addEventListener('hashchange', render);
+
+  // Desktop shortcut: space pauses and resumes a focus block when nothing else has focus.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== ' ' || e.repeat) return;
+    const a = timer.active();
+    if (!a || a.phase !== 'focus') return;
+    const el = document.activeElement;
+    if (el && el !== document.body && !el.classList.contains('screen') && el.tagName !== 'MAIN') return;
+    e.preventDefault();
+    audio.unlock();
+    timer.isPaused() ? timer.resume() : timer.pause();
+  });
 
   window.addEventListener('beforeunload', (e) => {
     const a = timer.active();

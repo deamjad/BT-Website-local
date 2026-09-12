@@ -97,11 +97,10 @@ export function relativeDay(key, today = todayKey()) {
 }
 
 export function fmtHours(h) {
-  if (h == null || Number.isNaN(h)) return '0 h';
+  if (h == null || Number.isNaN(h) || h <= 0) return '0 h';
+  if (h < 1) { const m = Math.max(1, Math.round(h * 60)); return `${m} min`; }
   const r = Math.round(h * 4) / 4;
-  if (r === 0) return '0 h';
   if (Number.isInteger(r)) return `${r} h`;
-  if (r < 1) return `${Math.round(r * 60)} min`;
   return `${r.toFixed(r * 2 % 1 === 0 ? 1 : 2).replace(/0$/, '')} h`;
 }
 

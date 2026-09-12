@@ -78,77 +78,103 @@ export function renderToday(root) {
   const startLabel = restDay ? 'Light session anyway' : examDay ? 'Light session' : 'Start session';
   const wrap = wrapSentence(today);
 
+  const upcoming = [];
+  for (let i = 1; upcoming.length < 4 && i <= 10; i++) {
+    const k = addDays(today, i);
+    if (k > PHASES[3].end) break;
+    const dd = store.day(k);
+    if (dd) upcoming.push(dd);
+  }
+
   root.innerHTML = `
-  <div class="page today">
+  <div class="page wide today">
     <header class="page-head">
       <p class="meta">${esc(fmtLong(today))}${phaseLabel(today) ? ` · ${esc(phaseLabel(today))}` : ''}</p>
       <h1 class="title">${esc(heading)}</h1>
       ${d && d.label && !examDay ? `<p class="meta">${esc(d.label)}</p>` : ''}
     </header>
 
-    ${nearest ? `
-    <section class="countdown" aria-label="Next exam">
-      <span class="countdown-num">${nearest.daysLeft}</span>
-      <span class="countdown-text">${nearest.daysLeft === 1 ? 'day' : 'days'} until <strong>${esc(nearest.name)}</strong>${exams.length > 1 ? `<br><span class="meta">then ${esc(exams[1].short)} ${exams[1].daysLeft - nearest.daysLeft === 1 ? 'the next day' : `${exams[1].daysLeft - nearest.daysLeft} days later`}</span>` : ''}</span>
-    </section>` : ''}
+    <div class="today-grid">
+      <section class="today-main">
+        ${nearest ? `
+        <div class="countdown" aria-label="Next exam">
+          <span class="countdown-num">${nearest.daysLeft}</span>
+          <span class="countdown-text">${nearest.daysLeft === 1 ? 'day' : 'days'} until <strong>${esc(nearest.name)}</strong>${exams.length > 1 ? `<br><span class="meta">then ${esc(exams[1].short)} ${exams[1].daysLeft - nearest.daysLeft === 1 ? 'the next day' : `${exams[1].daysLeft - nearest.daysLeft} days later`}</span>` : ''}</span>
+        </div>` : ''}
 
-    ${examDay ? `<p class="lede">${esc(d.label)}. Nothing else is planned. Breathe, eat something, and trust the work you have done.</p>` : ''}
-    ${restDay && !examDay ? `<p class="lede">Nothing planned. Rest is part of the plan. If you feel like a light session, it is here whenever you want it.</p>` : ''}
-    ${beforePlan ? `<p class="lede">Your plan starts on ${esc(fmtLong(PHASES[0].start))}. You can still start a session any time.</p>` : ''}
-    ${afterPlan ? `<p class="lede">Every exam is behind you. Well done.</p>` : ''}
-    ${!restDay && !examDay && !beforePlan && !afterPlan && !blocks.length ? `<p class="lede">Nothing is planned for today. Pick any subject and start.</p>` : ''}
+        ${examDay ? `<p class="lede">${esc(d.label)}. Nothing else is planned. Breathe, eat something, and trust the work you have done.</p>` : ''}
+        ${restDay && !examDay ? `<p class="lede">Nothing planned. Rest is part of the plan. If you feel like a light session, it is here whenever you want it.</p>` : ''}
+        ${beforePlan ? `<p class="lede">Your plan starts on ${esc(fmtLong(PHASES[0].start))}. You can still start a session any time.</p>` : ''}
+        ${afterPlan ? `<p class="lede">Every exam is behind you. Well done.</p>` : ''}
+        ${!restDay && !examDay && !beforePlan && !afterPlan && !blocks.length ? `<p class="lede">Nothing is planned for today. Pick any subject and start.</p>` : ''}
 
-    ${blocks.length ? `
-    <section class="today-blocks" aria-label="Today's plan">
-      ${blocks.map(b => {
-        const s = store.subject(b.subjectId); if (!s) return '';
-        const done = store.hoursOn(today, s.id);
-        const frac = b.hours ? Math.min(1, done / b.hours) : 0;
-        return `
-        <article class="subject-card" style="--subject:${esc(s.color)}">
-          <div class="subject-card-main">
-            <h2 class="subject-name">${esc(s.name)}</h2>
-            <p class="subject-note">${esc(b.note || '')}</p>
+        ${blocks.length ? `
+        <div class="today-blocks" aria-label="Today's plan">
+          ${blocks.map(b => {
+            const s = store.subject(b.subjectId); if (!s) return '';
+            const done = store.hoursOn(today, s.id);
+            const frac = b.hours ? Math.min(1, done / b.hours) : 0;
+            return `
+            <article class="subject-card" style="--subject:${esc(s.color)}">
+              <div class="subject-card-main">
+                <h2 class="subject-name">${esc(s.name)}</h2>
+                <p class="subject-note">${esc(b.note || '')}</p>
+              </div>
+              <div class="subject-card-side">
+                <span class="subject-hours">${esc(fmtHours(b.hours))}</span>
+                ${done > 0 ? `<span class="meta">${esc(fmtHours(done))} done</span>` : ''}
+              </div>
+              ${fillBar({ fraction: frac, color: s.color, cls: 'subject-fill' })}
+            </article>`;
+          }).join('')}
+        </div>` : ''}
+
+        <div class="start-actions">
+          <button type="button" class="btn primary big round" id="start-session">${esc(startLabel)}</button>
+          <button type="button" class="btn ghost" id="start-quick">Start with 5 minutes</button>
+        </div>
+      </section>
+
+      <aside class="today-side">
+        ${(doneH > 0 || planned > 0) ? `
+        <section class="side-card today-progress" aria-label="Today's progress">
+          <div class="row between">
+            <span>${doneH > 0 ? `<strong>${esc(fmtHours(doneH))}</strong> done today` : 'Nothing logged yet today'}</span>
+            ${planned ? `<span class="meta">${esc(fmtHours(planned))} planned</span>` : ''}
           </div>
-          <div class="subject-card-side">
-            <span class="subject-hours">${esc(fmtHours(b.hours))}</span>
-            ${done > 0 ? `<span class="meta">${esc(fmtHours(done))} done</span>` : ''}
-          </div>
-          ${fillBar({ fraction: frac, color: s.color, cls: 'subject-fill' })}
-        </article>`;
-      }).join('')}
-    </section>` : ''}
+          ${fillBar({ fraction: planned ? doneH / planned : (doneH > 0 ? 1 : 0), cls: 'today-fill' })}
+          ${streak > 0 ? `<p class="streak"><span class="streak-mark" aria-hidden="true"></span>${streak === 1 ? 'A new streak started today' : `${streak} days in a row`}</p>`
+            : everStudied ? `<p class="meta streak-neutral">New streak starts today.</p>` : ''}
+        </section>` : (streak > 0 ? `<p class="streak"><span class="streak-mark" aria-hidden="true"></span>${streak === 1 ? 'A new streak started today' : `${streak} days in a row`}</p>` : everStudied ? `<p class="meta streak-neutral">New streak starts today.</p>` : '')}
 
-    <section class="start-actions">
-      <button type="button" class="btn primary big round" id="start-session">${esc(startLabel)}</button>
-      <button type="button" class="btn ghost" id="start-quick">Start with 5 minutes</button>
-    </section>
+        ${wrap ? `<p class="wrap">${esc(wrap)}</p>` : ''}
 
-    ${(doneH > 0 || planned > 0) ? `
-    <section class="today-progress" aria-label="Today's progress">
-      <div class="row between">
-        <span>${doneH > 0 ? `<strong>${esc(fmtHours(doneH))}</strong> done today` : 'Nothing logged yet today'}</span>
-        ${planned ? `<span class="meta">${esc(fmtHours(planned))} planned</span>` : ''}
-      </div>
-      ${fillBar({ fraction: planned ? doneH / planned : (doneH > 0 ? 1 : 0), cls: 'today-fill' })}
-    </section>` : ''}
+        ${parked.length ? `
+        <section class="side-card parked" aria-label="Parked thoughts">
+          <h2 class="h3">Parked thoughts</h2>
+          <ul class="list">
+            ${parked.map(t => `
+              <li class="list-item parked-item">
+                <span class="parked-text">${esc(t.text)}</span>
+                <button type="button" class="btn small ghost" data-resolve="${esc(t.id)}">Done</button>
+              </li>`).join('')}
+          </ul>
+        </section>` : ''}
 
-    ${streak > 0 ? `<p class="streak"><span class="streak-mark" aria-hidden="true"></span>${streak === 1 ? 'A new streak started today' : `${streak} days in a row`}</p>`
-      : everStudied ? `<p class="meta streak-neutral">New streak starts today.</p>` : ''}
-
-    ${wrap ? `<p class="wrap">${esc(wrap)}</p>` : ''}
-
-    ${parked.length ? `
-    <section class="parked" aria-label="Parked thoughts">
-      <h2 class="h2">Parked thoughts</h2>
-      <ul class="list">
-        ${parked.map(t => `
-          <li class="list-item parked-item">
-            <span class="parked-text">${esc(t.text)}</span>
-            <button type="button" class="btn small ghost" data-resolve="${esc(t.id)}">Done</button>
-          </li>`).join('')}
-      </ul>
-    </section>` : ''}
+        ${upcoming.length ? `
+        <section class="side-card coming-up" aria-label="Coming up">
+          <h2 class="h3">Coming up</h2>
+          <ul class="list compact">
+            ${upcoming.map(dd => {
+              const exam = dd.isExamDay ? store.subject(dd.examSubjectId) : null;
+              const what = exam ? `${esc(exam.short)} exam` : dd.isRestDay ? 'Rest day' : dd.blocks.length ? dd.blocks.map(b => { const sb = store.subject(b.subjectId); return sb ? `<span class="coming-item">${dot(sb.color)}${esc(sb.short)} <span class="meta">${esc(fmtHours(b.hours))}</span></span>` : ''; }).join('') : 'Nothing planned';
+              return `<li class="list-item"><span class="coming-day">${esc(fmtDayName(dd.date, true))} <span class="meta">${esc(fmtDayMonth(dd.date))}</span></span><span class="coming-what">${what}</span></li>`;
+            }).join('')}
+          </ul>
+          <a class="btn link inline" href="#/plan">Open the plan</a>
+        </section>` : ''}
+      </aside>
+    </div>
   </div>`;
 
   root.querySelector('#start-session').addEventListener('click', () => go('#/setup'));
@@ -261,7 +287,7 @@ export function renderPlan(root, params = {}) {
   if (!planWeek) planWeek = weekStart(today < PHASES[0].start ? PHASES[0].start : today > PHASES[3].end ? PHASES[3].end : today);
 
   root.innerHTML = `
-  <div class="page plan">
+  <div class="page wide plan">
     <header class="page-head plan-head">
       <h1 class="title">Plan</h1>
       <div class="segmented compact" role="tablist" aria-label="Plan view">
@@ -295,16 +321,13 @@ function renderWeek(body, today) {
         <button type="button" class="btn small ghost" id="prev-week">Previous week</button>
         ${planWeek !== weekStart(today) ? `<button type="button" class="btn small ghost" id="this-week">This week</button>` : ''}
         <button type="button" class="btn small ghost" id="next-week">Next week</button>
+        ${canShuffle ? `<button type="button" class="btn small ghost push-right" id="reshuffle">Reshuffle this week</button>` : ''}
       </div>
     </div>
-    ${phase ? `<p class="meta guardrails">Usual shape: up to ${phase.weekdayCap} h on weekdays, ${phase.weekendCap} h on weekends, two subjects a day, Fridays off.</p>` : ''}
+    ${phase ? `<p class="meta guardrails">Usual shape: up to ${phase.weekdayCap} h on weekdays, ${phase.weekendCap} h on weekends, two subjects a day, Fridays off. Drag a block to another day to move it.</p>` : ''}
 
     <div class="plan-days">
       ${days.map(d => dayCard(d, today)).join('')}
-    </div>
-
-    <div class="actions">
-      ${canShuffle ? `<button type="button" class="btn ghost" id="reshuffle">Reshuffle this week</button>` : ''}
     </div>`;
 
   body.querySelector('#prev-week').addEventListener('click', () => { planWeek = addDays(planWeek, -7); renderWeek(body, today); });
@@ -358,8 +381,8 @@ function dayCard(d, today) {
   return `
   <article class="plan-day${isToday ? ' is-today' : ''}${past ? ' is-past' : ''}${d.locked ? ' is-locked' : ''}${d.isRestDay ? ' is-rest' : ''}" data-day="${d.date}">
     <header class="plan-day-head">
-      <div>
-        <strong>${esc(fmtDayName(d.date))}</strong> <span class="meta">${esc(fmtDayMonth(d.date))}${isToday ? ' · today' : ''}</span>
+      <div class="plan-day-title">
+        <strong><span class="day-long">${esc(fmtDayName(d.date))}</span><span class="day-short">${esc(fmtDayName(d.date, true))}</span></strong> <span class="meta">${esc(fmtDayMonth(d.date))}${isToday ? ' · today' : ''}</span>
       </div>
       <span class="meta">${exam ? '' : d.isRestDay ? 'Rest day' : total ? esc(fmtHours(total)) : ''}</span>
     </header>
@@ -375,7 +398,8 @@ function dayCard(d, today) {
           <button type="button" class="plan-block${complete ? ' is-done' : ''}" data-edit-block="${esc(b.id)}" data-day="${d.date}" ${d.locked ? 'disabled' : 'draggable="true"'} style="--subject:${esc(s.color)}">
             ${dot(s.color)}
             <span class="plan-block-main">
-              <span class="plan-block-name">${esc(s.short)} <span class="meta">${esc(fmtHours(b.hours))}${done > 0 && !complete ? ` · ${esc(fmtHours(done))} done` : ''}</span></span>
+              <span class="plan-block-name">${esc(s.short)}</span>
+              <span class="plan-block-hours meta">${esc(fmtHours(b.hours))}${done > 0 && !complete ? ` · ${esc(fmtHours(done))} done` : ''}</span>
               ${b.note ? `<span class="plan-block-note">${esc(b.note)}</span>` : ''}
             </span>
             ${complete ? '<span class="plan-block-tick" aria-label="done">✓</span>' : ''}
@@ -387,7 +411,7 @@ function dayCard(d, today) {
     ${d.locked ? '' : `
     <footer class="plan-day-foot">
       <button type="button" class="btn small ghost" data-add-block="${d.date}">Add block</button>
-      <button type="button" class="btn small ghost" data-toggle-rest="${d.date}">${d.isRestDay ? 'Make study day' : 'Make rest day'}</button>
+      <button type="button" class="btn small ghost" data-toggle-rest="${d.date}" aria-label="${d.isRestDay ? 'Make this a study day' : 'Make this a rest day'}">${d.isRestDay ? 'Study day' : 'Rest day'}</button>
     </footer>`}
   </article>`;
 }
@@ -514,7 +538,7 @@ function undoToast(message) {
 
 function renderPhases(body, today) {
   const subjects = store.get().subjects;
-  body.innerHTML = PHASES.map(p => {
+  body.innerHTML = '<div class="phases-grid">' + PHASES.map(p => {
     const keys = eachDay(p.start, p.end);
     const days = keys.map(k => store.day(k)).filter(Boolean);
     const bySubject = Object.fromEntries(subjects.map(s => [s.id, 0]));
@@ -553,7 +577,7 @@ function renderPhases(body, today) {
           </button>`).join('')}
       </div>
     </section>`;
-  }).join('');
+  }).join('') + '</div>';
   body.querySelectorAll('[data-week]').forEach(b => b.addEventListener('click', () => {
     planWeek = weekStart(b.dataset.week); planView = 'week'; renderPlan(body.closest('.screen') || body.parentElement.parentElement);
   }));
@@ -576,41 +600,43 @@ export function renderProgress(root) {
   const shown = logExpanded ? sessions : sessions.slice(0, 12);
 
   root.innerHTML = `
-  <div class="page progress">
+  <div class="page wide progress">
     <header class="page-head"><h1 class="title">Progress</h1></header>
 
     <section class="stats" aria-label="Totals">
       <div class="stat"><span class="stat-num">${esc(fmtHours(t.hours))}</span><span class="stat-label">studied</span></div>
       <div class="stat"><span class="stat-num">${t.sessions}</span><span class="stat-label">${t.sessions === 1 ? 'session' : 'sessions'}</span></div>
       <div class="stat"><span class="stat-num">${t.goalsDone}</span><span class="stat-label">${t.goalsDone === 1 ? 'goal ticked' : 'goals ticked'}</span></div>
+      <div class="stat${streak > 0 ? ' stat-amber' : ''}"><span class="stat-num">${streak}</span><span class="stat-label">${streak === 1 ? 'day in a row' : 'days in a row'}</span></div>
     </section>
-    ${streak > 0 ? `<p class="streak"><span class="streak-mark" aria-hidden="true"></span>${streak === 1 ? 'A new streak started today' : `${streak} days in a row`}</p>` : ''}
 
     ${t.sessions === 0 ? `<p class="lede">Nothing logged yet. Your first session will show up here, and every one after it.</p>` : ''}
 
-    <section aria-labelledby="h-subjects">
-      <h2 class="h2" id="h-subjects">Hours by subject</h2>
-      <div class="bars">
-        ${subjects.map(s => `
-          <div class="bar-row">
-            <span class="bar-label">${dot(s.color)}${esc(s.short)}</span>
-            ${fillBar({ fraction: t.bySubject[s.id] / maxSubj, color: s.color })}
-            <span class="bar-value">${esc(fmtHours(t.bySubject[s.id] / 60))}</span>
-          </div>`).join('')}
-      </div>
-    </section>
+    <div class="two-col">
+      <section aria-labelledby="h-subjects">
+        <h2 class="h2" id="h-subjects">Hours by subject</h2>
+        <div class="bars">
+          ${subjects.map(s => `
+            <div class="bar-row">
+              <span class="bar-label">${dot(s.color)}${esc(s.short)}</span>
+              ${fillBar({ fraction: t.bySubject[s.id] / maxSubj, color: s.color })}
+              <span class="bar-value">${esc(fmtHours(t.bySubject[s.id] / 60))}</span>
+            </div>`).join('')}
+        </div>
+      </section>
 
-    <section aria-labelledby="h-weeks">
-      <h2 class="h2" id="h-weeks">Hours by week</h2>
-      <div class="columns" role="img" aria-label="${esc(weeks.map(w => `${fmtRange(w.start, w.end)}: ${fmtHours(w.hours)}`).join('. '))}">
-        ${weeks.map(w => `
-          <div class="column${w.start === weekStart(today) ? ' is-current' : ''}">
-            <span class="column-value">${w.hours > 0 ? esc(fmtHours(w.hours)) : ''}</span>
-            <div class="column-track"><div class="column-bar" style="height:${Math.round(w.hours / maxWeek * 100)}%"></div></div>
-            <span class="column-label">${esc(fmtDayMonth(w.start))}</span>
-          </div>`).join('')}
-      </div>
-    </section>
+      <section aria-labelledby="h-weeks">
+        <h2 class="h2" id="h-weeks">Hours by week</h2>
+        <div class="columns" role="img" aria-label="${esc(weeks.map(w => `${fmtRange(w.start, w.end)}: ${fmtHours(w.hours)}`).join('. '))}">
+          ${weeks.map(w => `
+            <div class="column${w.start === weekStart(today) ? ' is-current' : ''}">
+              <span class="column-value">${w.hours > 0 ? esc(fmtHours(w.hours)) : ''}</span>
+              <div class="column-track"><div class="column-bar" style="height:${Math.round(w.hours / maxWeek * 100)}%"></div></div>
+              <span class="column-label">${esc(fmtDayMonth(w.start))}</span>
+            </div>`).join('')}
+        </div>
+      </section>
+    </div>
 
     <section aria-labelledby="h-exams">
       <h2 class="h2" id="h-exams">Exams</h2>
@@ -627,16 +653,21 @@ export function renderProgress(root) {
     ${sessions.length ? `
     <section aria-labelledby="h-log">
       <h2 class="h2" id="h-log">Session log</h2>
-      <ul class="list log">
-        ${shown.map(s => { const sub = store.subject(s.subjectId); const g = s.goals || []; return `
-          <li class="list-item log-item" style="--subject:${esc(sub?.color || '#999')}">
-            ${dot(sub?.color || '#999')}
-            <span class="log-main">
-              <span><strong>${esc(sub?.short || 'Subject')}</strong> · ${esc(fmtMinutes(s.actualMinutes))}</span>
-              <span class="meta">${esc(relativeDay(s.date, today))}${g.length ? ` · ${g.filter(x => x.done).length} of ${g.length} goals` : ''}${s.reflection ? ` · “${esc(s.reflection)}”` : ''}</span>
-            </span>
-          </li>`; }).join('')}
-      </ul>
+      <div class="table-wrap">
+        <table class="log">
+          <thead><tr><th scope="col">When</th><th scope="col">Subject</th><th scope="col">Length</th><th scope="col">Goals</th><th scope="col">Note for next time</th></tr></thead>
+          <tbody>
+            ${shown.map(s => { const sub = store.subject(s.subjectId); const g = s.goals || []; return `
+              <tr class="log-row">
+                <td>${esc(relativeDay(s.date, today))}<span class="meta log-time"> · ${new Date(s.startedAt || 0).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span></td>
+                <td><span class="bar-label">${dot(sub?.color || '#999')}${esc(sub?.short || 'Subject')}</span></td>
+                <td>${esc(fmtMinutes(s.actualMinutes))}${s.blocksCompleted ? `<span class="meta"> · ${plural(s.blocksCompleted, 'block')}</span>` : ''}</td>
+                <td>${g.length ? `${g.filter(x => x.done).length} of ${g.length}` : '<span class="meta">none set</span>'}</td>
+                <td class="log-note">${s.reflection ? esc(s.reflection) : ''}</td>
+              </tr>`; }).join('')}
+          </tbody>
+        </table>
+      </div>
       ${sessions.length > 12 ? `<button type="button" class="btn ghost small" id="log-more">${logExpanded ? 'Show fewer' : `Show all ${sessions.length}`}</button>` : ''}
     </section>` : ''}
   </div>`;
@@ -658,9 +689,10 @@ export function renderSettings(root, { memoryOnly = false, installPrompt = null 
     </label>`;
 
   root.innerHTML = `
-  <div class="page settings">
+  <div class="page wide settings">
     <header class="page-head"><h1 class="title">Settings</h1></header>
     ${memoryOnly ? `<p class="note">Saving is not available in this browser, so changes last only until you close the tab. Export a backup before you leave.</p>` : ''}
+    <div class="settings-grid">
 
     <section class="settings-group" aria-labelledby="h-timer">
       <h2 class="h2" id="h-timer">Timer</h2>
@@ -719,10 +751,12 @@ export function renderSettings(root, { memoryOnly = false, installPrompt = null 
     </section>
 
     <section class="settings-group" aria-labelledby="h-app">
-      <h2 class="h2" id="h-app">On your phone</h2>
-      ${installPrompt ? `<button type="button" class="btn ghost" id="install">Add to home screen</button>` :
-        `<p class="meta">On iPhone: open in Safari, tap Share, then “Add to Home Screen”. On Android: open the browser menu and choose “Install app” or “Add to Home screen”. It works offline once installed.</p>`}
+      <h2 class="h2" id="h-app">Install as an app</h2>
+      <p class="meta">The app works offline once it has loaded. ${installPrompt ? 'You can install it so it opens in its own window.' : 'In Chrome or Edge, use the install icon at the right of the address bar to open it in its own window. On a phone, use “Add to Home Screen” from the browser menu.'}</p>
+      ${installPrompt ? `<button type="button" class="btn ghost" id="install">Install</button>` : ''}
+      <p class="meta">Keyboard: during a focus block, Space pauses and resumes. Escape closes any dialog.</p>
     </section>
+    </div>
   </div>`;
 
   const commit = (patch) => { store.setSettings(patch); audio.configure(store.get().settings); };

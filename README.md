@@ -29,15 +29,19 @@ public/study/        Study Companion static app (served at /study/)
 
 ## Study Companion (`/study`)
 
-A separate, fully static single-page app that lives in `public/study/` and is copied
+A separate, fully static single-page web app that lives in `public/study/` and is copied
 untouched into `dist/study/` by the Vite build, so it deploys with the main site at
 `btransform.biz/study/`. It has no backend, no accounts and no build step of its own.
 
+- Designed for the browser on a laptop or desktop: a sidebar layout, a seven-day week grid,
+  side-by-side charts and a table session log. It still adapts down to phone widths.
 - Vanilla JavaScript ES modules, one stylesheet, a web app manifest and a service worker
-  (works offline and installs to a phone home screen).
+  (works offline and can be installed from Chrome or Edge as its own window).
 - Data is kept in `localStorage` with JSON export/import for backups.
 - Sound is synthesised with the Web Audio API; confetti is drawn on a canvas. No asset files.
 - The study plan is seeded from `public/study/js/seed.js` and is fully editable in the app.
+- Keyboard: Space pauses and resumes a focus block, Escape closes dialogs, and the whole
+  session flow works with Tab and Enter.
 
 Run it locally from any static server, for example:
 
