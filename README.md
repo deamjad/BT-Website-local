@@ -23,8 +23,29 @@ src/hooks/           Assessment form state and submission flow
 src/types/           Assessment data models and survey definitions
 functions/           Firebase Functions backend
 public/              Static assets copied into the Vite build
+public/study/        Study Companion static app (served at /study/)
 .github/workflows/   GitHub Actions deployment workflow
 ```
+
+## Study Companion (`/study`)
+
+A separate, fully static single-page app that lives in `public/study/` and is copied
+untouched into `dist/study/` by the Vite build, so it deploys with the main site at
+`btransform.biz/study/`. It has no backend, no accounts and no build step of its own.
+
+- Vanilla JavaScript ES modules, one stylesheet, a web app manifest and a service worker
+  (works offline and installs to a phone home screen).
+- Data is kept in `localStorage` with JSON export/import for backups.
+- Sound is synthesised with the Web Audio API; confetti is drawn on a canvas. No asset files.
+- The study plan is seeded from `public/study/js/seed.js` and is fully editable in the app.
+
+Run it locally from any static server, for example:
+
+```bash
+cd public/study && python3 -m http.server 8765
+```
+
+Add `?today=YYYY-MM-DD` to the URL to preview the app as if it were another day.
 
 ## Local Setup
 
