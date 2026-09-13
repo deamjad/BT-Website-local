@@ -1,5 +1,9 @@
 // Offline support. The app shell is precached; fonts are cached on first use.
-const VERSION = 'study-companion-v1';
+// IMPORTANT: bump VERSION on every deploy that changes any file in SHELL below
+// (or any js/css). Browsers only re-check this worker when its own bytes
+// change, so an unbumped VERSION means visitors keep the old cached code
+// forever, even after clearing app data or resetting in-app settings.
+const VERSION = 'study-companion-v2';
 const SHELL = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icon.svg',
   './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png',
@@ -31,13 +35,16 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== location.origin) return;
 
   if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req).then(res => { putInCache(req, res.clone()); return res; })
-        .catch(() => caches.match('./index.html', { ignoreSearch: true }).then(r => r || caches.match('./')))
-    );
+    event.respondWith(networkFirst(req, './index.html'));
     return;
   }
-  event.respondWith(staleWhileRevalidate(req));
+  // Code and styles must never go quietly stale: prefer the network whenever
+  // it's reachable, and only fall back to the cache when offline. Images,
+  // icons and the manifest change rarely, so they stay on the faster,
+  // cache-first stale-while-revalidate path.
+  const isCode = req.destination === 'script' || req.destination === 'style'
+    || url.pathname.endsWith('.js') || url.pathname.endsWith('.css');
+  event.respondWith(isCode ? networkFirst(req) : staleWhileRevalidate(req));
 });
 
 async function cacheFirst(req) {
@@ -56,15 +63,28 @@ async function cacheFirst(req) {
   }
 }
 
+// Always try the network first so a new deploy is visible on the very next
+// load while online; only serve the cached copy when the network fails.
+async function networkFirst(req, fallbackPath) {
+  const cache = await caches.open(VERSION);
+  try {
+    const res = await fetch(req);
+    if (res && res.ok) cache.put(req, res.clone());
+    return res;
+  } catch (e) {
+    const hit = await cache.match(req, { ignoreSearch: true });
+    if (hit) return hit;
+    if (fallbackPath) {
+      const shell = await cache.match(fallbackPath, { ignoreSearch: true });
+      if (shell) return shell;
+    }
+    return new Response('', { status: 504, statusText: 'Offline' });
+  }
+}
+
 async function staleWhileRevalidate(req) {
   const cache = await caches.open(VERSION);
   const hit = await cache.match(req, { ignoreSearch: true });
   const network = fetch(req).then(res => { if (res && res.ok) cache.put(req, res.clone()); return res; }).catch(() => null);
   return hit || (await network) || new Response('', { status: 504, statusText: 'Offline' });
-}
-
-async function putInCache(req, res) {
-  if (!res || !res.ok) return;
-  const cache = await caches.open(VERSION);
-  cache.put(req, res);
 }
