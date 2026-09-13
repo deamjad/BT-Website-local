@@ -16,13 +16,13 @@ export const SUBJECTS = [
 export const SUBJECT_COLORS = ['#E0457B', '#8E2A5E', '#E8705A', '#D9678F', '#A366A0', '#B3305C'];
 
 export const PHASES = [
-  { id: 'p1', name: 'Foundations',        start: '2026-09-14', end: '2026-10-11', weekdayCap: 1.5, weekendCap: 3,
+  { id: 'p1', name: 'Foundations',        start: '2026-09-14', end: '2026-10-11', weekdayCap: 4, weekendCap: 6,
     blurb: 'Notes, key ideas and getting back into the habit.',
     weights: { eng3: 1.15, eng2: 1, chem: 1, phys: 1, math: 1, dtec: 0.85 } },
-  { id: 'p2', name: 'Build',              start: '2026-10-12', end: '2026-10-29', weekdayCap: 2,   weekendCap: 3.5,
+  { id: 'p2', name: 'Build',              start: '2026-10-12', end: '2026-10-29', weekdayCap: 4, weekendCap: 6,
     blurb: 'Practice questions and timed writing.',
     weights: { eng3: 1.2, eng2: 1.1, chem: 1, phys: 1, math: 1, dtec: 0.8 } },
-  { id: 'p3', name: 'Holiday intensive',  start: '2026-10-30', end: '2026-11-08', weekdayCap: 4,   weekendCap: 4,
+  { id: 'p3', name: 'Holiday intensive',  start: '2026-10-30', end: '2026-11-08', weekdayCap: 4, weekendCap: 6,
     blurb: 'Full past papers under exam conditions.',
     weights: { eng3: 1.6, eng2: 1.4, chem: 1, phys: 1, math: 1, dtec: 0.6 } },
   { id: 'p4', name: 'Exam countdown',     start: '2026-11-09', end: '2026-11-27', weekdayCap: 3,   weekendCap: 3,
